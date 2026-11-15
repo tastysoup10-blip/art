@@ -1,0 +1,387 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Art Gallery</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #15151b;
+    color: #f2f2f5;
+}
+
+header {
+    padding: 35px 20px;
+    text-align: center;
+    background: #20202a;
+}
+
+header h1 {
+    margin: 0 0 10px;
+    font-size: 32px;
+}
+
+header p {
+    color: #aaaab8;
+    margin: 0;
+}
+
+.controls {
+    max-width: 1100px;
+    margin: 25px auto;
+    padding: 0 20px;
+}
+
+#search {
+    width: 100%;
+    padding: 13px 16px;
+    border: 1px solid #393946;
+    border-radius: 9px;
+    background: #24242e;
+    color: white;
+    font-size: 16px;
+    outline: none;
+}
+
+#search:focus {
+    border-color: #a78bfa;
+}
+
+#status {
+    color: #aaaab8;
+    margin: 15px 0;
+    font-size: 14px;
+}
+
+.gallery {
+    max-width: 1200px;
+    margin: auto;
+    padding: 0 20px 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 18px;
+}
+
+.artwork {
+    background: #24242e;
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.artwork:hover {
+    transform: translateY(-4px);
+    background: #30303d;
+}
+
+.artwork img {
+    display: block;
+    width: 100%;
+    height: 220px;
+    object-fit: contain;
+    background: #191920;
+}
+
+.artwork p {
+    padding: 12px;
+    margin: 0;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+    color: #dddde5;
+}
+
+#viewer {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.94);
+    align-items: center;
+    justify-content: center;
+    padding: 65px 20px;
+}
+
+#viewer.active {
+    display: flex;
+}
+
+#viewer img {
+    max-width: 90%;
+    max-height: 82vh;
+    object-fit: contain;
+}
+
+.viewer-button {
+    position: absolute;
+    border: none;
+    background: #30303d;
+    color: white;
+    font-size: 25px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+#close {
+    top: 20px;
+    right: 20px;
+}
+
+#previous {
+    left: 20px;
+}
+
+#next {
+    right: 20px;
+}
+
+#viewer-title {
+    position: absolute;
+    bottom: 18px;
+    color: #dddde5;
+    text-align: center;
+    max-width: 80%;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+    .gallery {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .artwork img {
+        height: 150px;
+    }
+
+    #viewer img {
+        max-width: 100%;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <h1>My Art Gallery</h1>
+    <p>A collection of my drawings and artwork</p>
+</header>
+
+<div class="controls">
+    <input
+        type="search"
+        id="search"
+        placeholder="Search drawings..."
+    >
+    <p id="status">Loading artwork...</p>
+</div>
+
+<main class="gallery" id="gallery"></main>
+
+<div id="viewer">
+    <button class="viewer-button" id="close">×</button>
+    <button class="viewer-button" id="previous">‹</button>
+    <img id="viewer-image" alt="">
+    <button class="viewer-button" id="next">›</button>
+    <p id="viewer-title"></p>
+</div>
+
+<script>
+const OWNER = "tastysoup10-blip";
+const REPO = "art";
+const BRANCH = "main";
+
+// Folders to check for artwork.
+// The repository's main directory is checked automatically.
+const FOLDERS = ["", "images", "drawings", "art"];
+
+const gallery = document.getElementById("gallery");
+const statusText = document.getElementById("status");
+const search = document.getElementById("search");
+
+const viewer = document.getElementById("viewer");
+const viewerImage = document.getElementById("viewer-image");
+const viewerTitle = document.getElementById("viewer-title");
+
+let allImages = [];
+let visibleImages = [];
+let currentIndex = 0;
+
+const imageExtensions = [
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"
+];
+
+function isImage(filename) {
+    return imageExtensions.some(ext =>
+        filename.toLowerCase().endsWith(ext)
+    );
+}
+
+async function loadFolder(folder) {
+    const path = folder ? `/${folder}` : "";
+
+    const url =
+        `https://api.github.com/repos/${OWNER}/${REPO}/contents${path}?ref=${BRANCH}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        throw new Error(`Could not load ${folder || "root"}`);
+    }
+
+    const files = await response.json();
+
+    return files
+        .filter(file =>
+            file.type === "file" && isImage(file.name)
+        )
+        .map(file => ({
+            name: file.name,
+            url: file.download_url
+        }));
+}
+
+async function loadGallery() {
+    statusText.textContent = "Finding your drawings...";
+
+    try {
+        const results = await Promise.all(
+            FOLDERS.map(folder =>
+                loadFolder(folder).catch(() => [])
+            )
+        );
+
+        const unique = new Map();
+
+        results.flat().forEach(image => {
+            unique.set(image.url, image);
+        });
+
+        allImages = [...unique.values()];
+        allImages.sort((a, b) =>
+            a.name.localeCompare(b.name)
+        );
+
+        renderGallery(allImages);
+
+        if (allImages.length === 0) {
+            statusText.textContent =
+                "No images found. Check that your drawings are in the repository.";
+        } else {
+            statusText.textContent =
+                `${allImages.length} drawings found`;
+        }
+
+    } catch (error) {
+        statusText.textContent =
+            "Unable to load the gallery. Please try again later.";
+        console.error(error);
+    }
+}
+
+function renderGallery(images) {
+    gallery.innerHTML = "";
+    visibleImages = images;
+
+    images.forEach((image, index) => {
+        const card = document.createElement("article");
+        card.className = "artwork";
+
+        const img = document.createElement("img");
+        img.src = image.url;
+        img.alt = image.name;
+        img.loading = "lazy";
+
+        const title = document.createElement("p");
+        title.textContent = image.name;
+
+        card.append(img, title);
+
+        card.addEventListener("click", () => {
+            openViewer(index);
+        });
+
+        gallery.appendChild(card);
+    });
+}
+
+function openViewer(index) {
+    currentIndex = index;
+    updateViewer();
+    viewer.classList.add("active");
+}
+
+function updateViewer() {
+    const image = visibleImages[currentIndex];
+
+    if (!image) return;
+
+    viewerImage.src = image.url;
+    viewerImage.alt = image.name;
+    viewerTitle.textContent =
+        `${image.name} (${currentIndex + 1} of ${visibleImages.length})`;
+}
+
+function changeImage(direction) {
+    if (!visibleImages.length) return;
+
+    currentIndex =
+        (currentIndex + direction + visibleImages.length)
+        % visibleImages.length;
+
+    updateViewer();
+}
+
+function closeViewer() {
+    viewer.classList.remove("active");
+}
+
+document.getElementById("close")
+    .addEventListener("click", closeViewer);
+
+document.getElementById("previous")
+    .addEventListener("click", () => changeImage(-1));
+
+document.getElementById("next")
+    .addEventListener("click", () => changeImage(1));
+
+viewer.addEventListener("click", event => {
+    if (event.target === viewer) closeViewer();
+});
+
+document.addEventListener("keydown", event => {
+    if (!viewer.classList.contains("active")) return;
+
+    if (event.key === "Escape") closeViewer();
+    if (event.key === "ArrowLeft") changeImage(-1);
+    if (event.key === "ArrowRight") changeImage(1);
+});
+
+search.addEventListener("input", () => {
+    const query = search.value.toLowerCase();
+
+    const filtered = allImages.filter(image =>
+        image.name.toLowerCase().includes(query)
+    );
+
+    renderGallery(filtered);
+
+    statusText.textContent =
+        `${filtered.length} drawings shown`;
+});
+
+loadGallery();
+</script>
+
+</body>
+</html>
